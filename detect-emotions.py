@@ -1,11 +1,23 @@
 import cv2
 import numpy as np
-from deepface import DeepFace
+from keras.models import load_model
+from keras.preprocessing.image import img_to_array
 
-# Load OpenCV's built-in face detector (faster than DeepFace for face detection)
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+# ✅ Load face detection model
+face_cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+face_classifier = cv2.CascadeClassifier(face_cascade_path)
 
-# Open webcam
+if face_classifier.empty():
+    print("Error: Haar cascade model not found! Check OpenCV installation.")
+    exit()
+
+# ✅ Load emotion detection model
+emotion_model = load_model("emotion_detection_model_100epochs.h5")
+
+# Emotion labels
+class_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
+
+# ✅ Start webcam capture
 cap = cv2.VideoCapture(0)
 
 while True:
@@ -13,34 +25,30 @@ while True:
     if not ret:
         break
 
-    # Convert frame to grayscale (faster face detection)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # Detect faces in the frame
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale (faster face detection)
+    faces = face_classifier.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
 
     for (x, y, w, h) in faces:
-        face_roi = frame[y:y + h, x:x + w]  # Extract only the face region
+        roi_gray = gray[y:y+h, x:x+w]  # Extract face region
+        roi_gray = cv2.resize(roi_gray, (48, 48))  # Resize to match model input size
 
-        try:
-            # Run DeepFace analysis only on detected face
-            analysis = DeepFace.analyze(face_roi, actions=['emotion'], enforce_detection=False)
-            emotion = analysis[0]['dominant_emotion']
+        # Normalize & preprocess image for the model
+        roi = roi_gray.astype("float") / 255.0  # Scale pixel values
+        roi = img_to_array(roi)  # Convert to array
+        roi = np.expand_dims(roi, axis=0)  # Reshape for model input (1, 48, 48, 1)
 
-            # Draw a rectangle around the face
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # ✅ Predict emotion
+        preds = emotion_model.predict(roi)[0]
+        label = class_labels[np.argmax(preds)]  # Get highest probability class
 
-            # Display detected emotion on the frame
-            cv2.putText(frame, f"Emotion: {emotion}", (x, y - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # ✅ Draw rectangle around face & label emotion
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 1)
+        cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-        except Exception as e:
-            print("Emotion detection error:", e)
+    # ✅ Show real-time video
+    cv2.imshow("Real-Time Emotion Detector", frame)
 
-    # Show the real-time video feed
-    cv2.imshow("Real-Time Emotion Detection", frame)
-
-    # Press 'q' to quit
+    # Press 'q' to exit
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
